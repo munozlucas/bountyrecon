@@ -19,32 +19,30 @@ alive(){
 alive
 
 nuclei_scanner(){
-	cat $domain/scans/httpx.txt | nuclei -i /nuclei-templates/cves/ -c 50 -o $domain/scans/nuclei/cves.txt
-	cat $domain/scans/httpx.txt | nuclei -i /nuclei-templates/vulnerabilities/ -c 50 -o $domain/scans/nuclei/vulnerabilities.txt
-	cat $domain/scans/httpx.txt | nuclei -i /nuclei-templates/files/ -c 50 -o $domain/scans/nuclei/files.txt
-	cat $domain/scans/httpx.txt | nuclei -i /nuclei-templates/payloads/ -c 50 -o $domain/scans/nuclei/payloads.txt
-	cat $domain/scans/httpx.txt | nuclei -i /nuclei-templates/generic-detections/ -c 50 -o $domain/scans/nuclei/generic.txt
+	cat $domain/scans/alive.txt | nuclei -t ~/nuclei-templates/cves/ -c 50 -o $domain/scans/nuclei/cves.txt
+	cat $domain/scans/alive.txt | nuclei -t ~/nuclei-templates/vulnerabilities/ -c 50 -o $domain/scans/nuclei/vulnerabilities.txt
+	cat $domain/scans/alive.txt | nuclei -t ~/nuclei-templates/files/ -c 50 -o $domain/scans/nuclei/files.txt
+	cat $domain/scans/alive.txt | nuclei -t ~/nuclei-templates/payloads/ -c 50 -o $domain/scans/nuclei/payloads.txt
+	cat $domain/scans/alive.txt | nuclei -t ~/nuclei-templates/generic-detections/ -c 50 -o $domain/scans/nuclei/generic.txt
 
 }
-nuclei_scanner
+#nuclei_scanner
 
 gau_recon(){
 	cat $domain/sources/all.txt | gau | tee $domain/scans/gau/tmp.txt
-//aca abajo agregar el bug bounty tip de eliminar todos los duplicados ver punto 5 arriba
+	#aca abajo agregar el bug bounty tip de eliminar todos los duplicados ver punto 5 arriba
 	cat $domain/scans/gau/tmp.txt | egrep -v ".(woff|ttf|svg|eot|png|jpeg|jpg|css|ico)" | sed 's/:80//g;s/:443//g' | sort -u > $domain/scans/gau/gau.txt
 	rm $domain/scans/gau/tmp.txt
 }
 gau_recon
 
 valid_urls(){
-	ffuf -c -u "FUZZ" -w $domain/scans/gau/gau.txt -o $domain/scans/gau/valid-temp.txt
-	cat $domain/scans/gau/valid-temp.txt | grep http | awk -F "," '{print $1}' >> $domain/scans/gau/valid.txt
-	$domain/scans/gau/valid-temp.txt
+	cat $domain/scans/alive.txt | httpx -threads 200 -o $domain/scans/alive-url.txt
 }
 valid_urls
 
 gf_recon(){
-	gf xss $domain/scans/gau/valid.txt | tee $domain/scans/gf/xss.txt
-	gf sqli $domain/scans/gau/valid.txt | tee $domain/scans/gf/sqli.txt
+	gf xss $domain/scans/alive-url.txt | tee $domain/scans/gf/xss.txt
+	gf sqli $domain/scans/alive-url.txt | tee $domain/scans/gf/sqli.txt
 }
 gf_recon
