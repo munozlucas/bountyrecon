@@ -1,48 +1,92 @@
 #!/bin/bash
 
-# todo poder mandar varios dominios
 domain=$1
-mkdir -p $domain $domain/sources $domain/scans $domain/scans/nuclei $domain/scans/gau $domain/scans/gf
+wordlist="/root/wordlist/all.txt"
+resolvers="/root/resolver.txt"
 
-domain_enum(){
-	subfinder -d $domain -o $domain/sources/subfinder.txt
-	assetfinder -subs-only $domain | tee $domain/sources/assetfinder.txt
-	amass enum -d $domain -o $domain/sources/amass.txt
+mkdir -p $domain $domain/sources $domain/Recon $domain/Recon/nuclei $domain/Recon/wayback $domain/Recon/gf $domain/Recon/wordlist $domain/Recon/masscan
 
-	cat $domain/sources/*.txt > $domain/sources/all.txt
-}
-domain_enum
+passive_enum(){
+    findomain -q -f /mainData/$file -r -u findomain_subdomains.txt
+    subfinder -d $domain -o $domain/sources/subfinder_subdomains.txt
+    assetfinder -subs-only $domain | tee $domain/sources/assetfinder_subdomains.txt 
+    amass enum -passive -d $domain -o $domain/sources/amass_subdomains.txt
 
-alive(){
-	cat $domain/sources/all.txt | httpx -threads 200 -o $domain/scans/alive.txt
-}
-alive
-
-nuclei_scanner(){
-	cat $domain/scans/alive.txt | nuclei -t ~/nuclei-templates/cves/ -c 50 -o $domain/scans/nuclei/cves.txt
-	cat $domain/scans/alive.txt | nuclei -t ~/nuclei-templates/vulnerabilities/ -c 50 -o $domain/scans/nuclei/vulnerabilities.txt
-	cat $domain/scans/alive.txt | nuclei -t ~/nuclei-templates/files/ -c 50 -o $domain/scans/nuclei/files.txt
-	cat $domain/scans/alive.txt | nuclei -t ~/nuclei-templates/payloads/ -c 50 -o $domain/scans/nuclei/payloads.txt
-	cat $domain/scans/alive.txt | nuclei -t ~/nuclei-templates/generic-detections/ -c 50 -o $domain/scans/nuclei/generic.txt
+    sort -u $domain/sources/*_subdomains.txt -o subdomains.txt
+    cat $domain/sources/subdomains.txt | rev | cut -d . -f 1-3 | rev | sort -u | tee $domain/sources/root_subdomains.txt
+    cat $domain/sources/*.txt | sort -u > $domain/sources/domains.txt
 
 }
-#nuclei_scanner
 
-gau_recon(){
-	cat $domain/sources/all.txt | gau | tee $domain/scans/gau/tmp.txt
-	#aca abajo agregar el bug bounty tip de eliminar todos los duplicados ver punto 5 arriba
-	cat $domain/scans/gau/tmp.txt | egrep -v ".(woff|ttf|svg|eot|png|jpeg|jpg|css|ico)" | sed 's/:80//g;s/:443//g' | sort -u > $domain/scans/gau/gau.txt
-	rm $domain/scans/gau/tmp.txt
+brute_subdomains(){
+    #agregar a active enum, agregar alterations en active
+    shuffledns -d $domain -w $wordlist -r $resolvers -o $domain/sources/shuffledns.txt
 }
-gau_recon
+
+
+resolving_domains(){
+    # cambiar por puredns
+    shuffledns -d $domain -list $domain/sources/all.txt -o $domain/domains.txt -r $resolvers
+}
+
+
+
+http_prob(){
+    cat $domain/domains.txt | httpx -threads 200 -o $domain/Recon/httpx.txt
+}
+
+
+
+scanner(){
+   cat $domain/Recon/httpx.txt nuclei -t /root/nuclei-templates/cves/ -c 50 -o $domain/Recon/nuclei/cves.txt
+   cat $domain/Recon/httpx.txt nuclei -t /root/nuclei-templates/vulnerabilities/ -c 50 -o $domain/Recon/nuclei/vulnerabilities.txt
+   cat $domain/Recon/httpx.txt nuclei -t /root/nuclei-templates/files/ -c 50 -o $domain/Recon/nuclei/files.txt
+}
+
+
+wayback_data(){
+    cat $domain/domains.txt | gau | tee $domain/Recon/wayback/tmp.txt
+    cat $domain/Recon/wayback/tmp.txt | egrep -v "\.woff|\.ttf|\.svg|\.png|\.jpeg|\.ico|\.eot|\.css" | sed 's/:80//g;s/:443//g' | sort -u > $domain/Recon/wayback/wayback.txt
+    rm $domain/Recon/wayback/tmp.txt
+
+}
+
 
 valid_urls(){
-	cat $domain/scans/alive.txt | httpx -threads 200 -o $domain/scans/alive-url.txt
+    fuzzer -c -u "FUZZ" -w $domain/Recon/wayback/wayback.txt -mc 200 -of csv -o $domain/Recon/wayback/valid-temp.txt
+    cat $domain/Recon/wayback/valid-temp.txt | grep http | awk -F "," '{print $1}' > $domain/Recon/wayback/valid.txt
+    rm  $domain/Recon/wayback/valid-temp.txt
 }
-valid_urls
 
-gf_recon(){
-	gf xss $domain/scans/alive-url.txt | tee $domain/scans/gf/xss.txt
-	gf sqli $domain/scans/alive-url.txt | tee $domain/scans/gf/sqli.txt
+
+gf_patterns(){
+    gf xss $domain/Recon/wayback/valid.txt | tee $domain/Recon/gf/xss.txt
+    gf sqli $domain/Recon/wayback/valid.txt | tee $domain/Recon/gf/sqli.txt
+    gf sqli $domain/Recon/wayback/valid.txt | tee $domain/Recon/gf/sqli.txt
 }
-gf_recon
+
+
+custom_wordlist(){
+    cat $domain/Recon/wayback/wayback.txt | unfurl -unique paths > $domain/Recon/wordlist/path.txt
+    cat $domain/Recon/wayback/wayback.txt | unfutl -unique keys > $domain/Recon/wordlist/keys.txt
+}
+
+
+get_ips(){
+    massdns -r $resolvers -t A -o S -w $domain/Recon/masscan/results.txt $domain/domains.txt
+    gf ip $domain/Recon/masscan/results.txt | sort -u > $domain/Recon/masscan/ip.txt
+}
+
+
+
+passive_enum
+active_enum
+resolving_domains
+
+http_prob
+scanner
+wayback_data
+valid_urls
+gf_patterns
+custom_wordlist
+get_ips
